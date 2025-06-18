@@ -12,11 +12,11 @@ DB :: sqlite.Sqlite3
 Query :: sqlite.Stmt
 Status :: sqlite.Status
 
-status_explain :: proc(status: Status) -> cstring {
+@(require_results) status_explain :: proc(status: Status) -> cstring {
 	return sqlite.errstr(status)
 }
 
-open :: proc(filename: cstring) -> (^DB, Status) {
+@(require_results) open :: proc(filename: cstring) -> (^DB, Status) {
 	db: ^DB
 	status := sqlite.open_v2(filename, &db, {.Read_Write, .Create}, nil)
 	if status != nil {
@@ -29,17 +29,29 @@ close :: proc(db: ^DB) -> (status: Status) {
 	return sqlite.close_v2(db)
 }
 
-sql_exec :: proc(db: ^DB, sql: string, args: ..any) -> (Status) {
+@(require_results) sql_exec :: proc{sql_bind_and_exec, sql_exec_query}
+
+@(require_results) sql_bind_and_exec :: proc(db: ^DB, sql: string, args: ..any) -> Status {
 	query, status := sql_bind(db, sql, ..args)
-	if status != nil {
-		return status
-	}
-	for _ in sql_row(db, query, struct {}) {
-	}
-	return .Ok
+	if status != nil { return status }
+
+	return sql_exec_query(query)
 }
 
-sql_bind :: proc(db: ^DB, sql: string, args: ..any) -> (^Query, Status) {
+@(require_results) sql_exec_query :: proc(query: ^Query) -> Status {
+	defer sqlite.finalize(query)
+
+	status := sqlite.step(query)
+	for status == .Row {
+		status = sqlite.step(query)
+	}
+
+	if status == .Done { return .Ok }
+
+	return status
+}
+
+@(require_results) sql_bind :: proc(db: ^DB, sql: string, args: ..any) -> (^Query, Status) {
 	query: ^Query
 	unused: [^]u8
 	status := sqlite.prepare_v2(db, raw_data(sql), cast(i32) len(sql), &query, &unused)
@@ -106,7 +118,7 @@ sql_bind :: proc(db: ^DB, sql: string, args: ..any) -> (^Query, Status) {
 	return query, nil
 }
 
-sql_row :: proc(db: ^DB, query: ^Query, $T: typeid) -> (T, bool)
+@(require_results) sql_row :: proc(query: ^Query, $T: typeid) -> (__: T, has_more_rows: bool)
 where
 	intrinsics.type_is_struct(T)
 {
@@ -117,13 +129,15 @@ where
 	if .raw_union in struct_info.flags {
 		fmt.panicf("Can not select into raw union: %v", typeid_of(T))
 	}
+
 	status := sqlite.step(query)
-	if status != .Row {
-		sqlite.finalize(query)
-		return {}, false
-	}
-	t := T {}
-	t_bytes := transmute([^]u8) &t
+    if status != .Row {
+        sqlite.finalize(query)
+        return {}, false
+    }
+
+	t := T{}
+	t_bytes := transmute([^]u8)&t
 	for field, field_idx in struct_info.types[:struct_info.field_count] {
 		col_idx := cast(i32) field_idx
 		col_type := sqlite.column_type(query, col_idx)
