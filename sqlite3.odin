@@ -33,7 +33,7 @@ close :: proc(db: ^DB) -> (status: Status) {
 
 @(require_results) sql_bind_and_exec :: proc(db: ^DB, sql: string, args: ..any) -> Status {
 	query, status := sql_bind(db, sql, ..args)
-	if status != nil { return status }
+	if status != nil { sqlite.finalize(query); return status }
 
 	return sql_exec_query(query)
 }
