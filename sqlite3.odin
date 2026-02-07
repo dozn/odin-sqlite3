@@ -55,15 +55,14 @@ close :: proc(db: ^DB) -> (status: Status) {
 	query: ^Query
 	unused: [^]u8
 	status := sqlite.prepare_v2(db, raw_data(sql), cast(i32) len(sql), &query, &unused)
-	if status != nil {
+	if status != .Ok {
 		return nil, status
 	}
 	for arg, arg_idx in args {
 		arg_idx := cast(i32) arg_idx + 1
 		arg_info := runtime.type_info_base(type_info_of(arg.id))
 		if arg == nil {
-			status = sqlite.bind_null(query, arg_idx)
-			if status == nil {
+			if status = sqlite.bind_null(query, arg_idx); status != .Ok {
 				fmt.panicf("Unable to bind argument %v: %s", arg, status_explain(status))
 			}
 		}
@@ -115,6 +114,7 @@ close :: proc(db: ^DB) -> (status: Status) {
 				status = sqlite.bind_blob(query, arg_idx, raw_data(value), cast(i32) len(value), nil)
 		}
 	}
+
 	return query, nil
 }
 
