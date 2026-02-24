@@ -65,8 +65,8 @@ close :: proc(db: ^DB) -> (status: Status) {
 			if status = sqlite.bind_null(query, arg_idx); status != .Ok {
 				fmt.panicf("Unable to bind argument %v: %s", arg, status_explain(status))
 			}
+			continue
 		}
-		status = Status.Ok
 		#partial switch arg_variant in arg_info.variant {
 			case runtime.Type_Info_Integer:
 				value, ok := reflect.as_i64(arg)
@@ -85,34 +85,29 @@ close :: proc(db: ^DB) -> (status: Status) {
 				assert(ok)
 				status = sqlite.bind_int(query, arg_idx, cast(i32) value)
 			case runtime.Type_Info_Bit_Set:
-				size_in_bits := type_info_of(arg_variant.elem.id).size
-				switch size_in_bits * 8 {
-				case 0: continue // Don't believe this is possible.
+				size_in_bytes := type_info_of(arg_variant.elem.id).size
+				switch size_in_bytes * 8 {
 				case 8:
 					value := (^i8)(arg.data)
 					status = sqlite.bind_int64(query, arg_idx, i64(value^))
-					continue
 				case 16:
 					value := (^i16)(arg.data)
 					status = sqlite.bind_int64(query, arg_idx, i64(value^))
-					continue
 				case 32:
 					value := (^i32)(arg.data)
 					status = sqlite.bind_int(query, arg_idx, value^)
-					continue
 				case 64:
 					value := (^i64)(arg.data)
 					status = sqlite.bind_int64(query, arg_idx, value^)
-					continue
 				case:
-					fmt.panicf("unknown bit_size byte size: %d", size_in_bits*8)
+					fmt.panicf("unknown bit_set byte size: %d", size_in_bytes)
 				}
-				panic("bit_set type not supported yet")
 			case runtime.Type_Info_Array:
 				if arg_variant.elem.id != u8 { fmt.panicf("Unsupported bind type", arg_variant) }
 				value := reflect.as_bytes(arg)
 				status = sqlite.bind_blob(query, arg_idx, raw_data(value), cast(i32) len(value), nil)
 		}
+		if status != .Ok { return nil, status }
 	}
 
 	return query, nil
